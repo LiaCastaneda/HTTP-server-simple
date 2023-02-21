@@ -37,7 +37,6 @@ int main(){
     printf("Conectado con servidor");
 
 
-
     return 0;
 
 }

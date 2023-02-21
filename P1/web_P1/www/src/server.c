@@ -6,7 +6,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <stdlib.h>
-#include "server_utils.h"
+#include "../includes/server_utils.h"
 #include <netinet/in.h>
 
 #include <arpa/inet.h>
@@ -32,7 +32,7 @@ int  main()
     serverSocket = server_init();
     if (serverSocket == -1) return -1;
 
-
+    
     /*Recibe conexiones entrantes*/
     for ( ; ; ) {
 
@@ -45,9 +45,9 @@ int  main()
 
         /*Crea un nuevo hilo por conexión*/
         if ( (childpid = fork()) == 0) { /* child process */    
-            printf("Proceso hijo creado");
-            /*web_child(client_socket);  process request */
-            
+            /* process request */
+            server_process_request(client_socket);
+
             exit(0);
         }
 
