@@ -8,22 +8,25 @@
 #include <stdlib.h>
 #include "../includes/server_utils.h"
 #include <netinet/in.h>
-
+#include <sys/wait.h>
 #include <arpa/inet.h>
 
 int serverSocket,client_socket;
+HttpRequest *httprequest;
 
 void sig_int(int signo){
-    printf("Terminación de proceso...");
-    close(serverSocket);
+    printf("\nTerminación de proceso...");
     close(client_socket);
-    exit(0);
+    close(serverSocket);
+    free(httprequest);
+    exit(EXIT_SUCCESS);
 }
 
 
 int  main()
 {
     int childpid;
+
 
     /*Configura función de manejo de interrupción de programa*/
     signal(SIGINT,sig_int);
@@ -32,7 +35,9 @@ int  main()
     serverSocket = server_init();
     if (serverSocket == -1) return -1;
 
-    
+    /*Reserva memoria para petición*/
+    httprequest = (HttpRequest *) malloc(sizeof(HttpRequest));
+
     /*Recibe conexiones entrantes*/
     for ( ; ; ) {
 
@@ -46,11 +51,26 @@ int  main()
         /*Crea un nuevo hilo por conexión*/
         if ( (childpid = fork()) == 0) { /* child process */    
             /* process request */
-            server_process_request(client_socket);
-
-            exit(0);
+            printf("Proceso creado");
+            server_process_request(client_socket,httprequest);
+            
+            /*Proceso hijo termina*/
+            close(client_socket);
+            exit(EXIT_SUCCESS); 
+            
+        } else if (childpid <0){
+            exit(EXIT_FAILURE);
         }
 
-        close(client_socket); /* parent closes connected socket */
+        close(client_socket); 
+
     }
+
+    if(httprequest!=NULL) free(httprequest);
+
+    /*cierra servidor*/
+    close(serverSocket);
+    exit(EXIT_SUCCESS);
+
+    return 0;
 }

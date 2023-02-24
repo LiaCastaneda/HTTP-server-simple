@@ -16,6 +16,7 @@
 /*Funciones privadas*/
 void _error_400();
 
+/*Inicializa servidor*/
 int server_init(){
 
     FILE *confile;
@@ -65,7 +66,6 @@ int server_init(){
         return -1;
     }
 
-
     /*Escucha a conecciones*/
     ret = listen(serverSocket,max_clients);
     if (ret == -1){
@@ -82,29 +82,29 @@ int server_accept_connection(int serverSocket){
 
     int lenght = sizeof(clientadress);
     clientSocket = accept(serverSocket,(struct sockaddr * )&clientadress,&lenght);
+    
     if (clientSocket == -1) {
         printf("Error aceptando la conexión");
         return -1;
     }else{
         char *s = inet_ntoa(clientadress.sin_addr);
-        printf("conexión aceptada de %s\n", s);
+        printf("Conexión aceptada de %s\n", s);
         return clientSocket;
     }
 }
 
-int server_process_request(int clientsocket){
+int server_process_request(int clientsocket, HttpRequest * httprequest){
     
-    char buf[MAX], *method, *path;
-    int pret, minor_version,i;
-    struct phr_header headers[100];
+    char buf[MAX];
+    int pret,i;
     size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
     ssize_t rret;
 
     
     while (1) {
         /* read the request */
-        while ((rret = read(clientsocket, buf + buflen, sizeof(buf) - buflen)) == -1 && errno == EINTR)
-            ;
+        while ((rret = read(clientsocket, buf + buflen, sizeof(buf) - buflen)) == -1 && errno == EINTR);
+
         if (rret <= 0)
             return -1;
         
@@ -112,9 +112,10 @@ int server_process_request(int clientsocket){
         buflen += rret;
 
         /* parse the request */
-        num_headers = sizeof(headers) / sizeof(headers[0]);
-        pret = phr_parse_request(buf, buflen, &method, &method_len, &path, &path_len,
-                                &minor_version, headers, &num_headers, prevbuflen);
+        num_headers = sizeof(httprequest->cabeceras) / sizeof(httprequest->cabeceras[0]);
+        pret = phr_parse_request(buf, buflen, &(httprequest->verbo), &method_len, &(httprequest->path), &path_len,
+                                &(httprequest->version), httprequest->cabeceras, &num_headers, prevbuflen);
+        
         if (pret > 0)
             break; /* successfully parsed the request */
         else if (pret == -1){
@@ -135,20 +136,26 @@ int server_process_request(int clientsocket){
     }
 
     printf("request is %d bytes long\n", pret);
-    printf("method is %.*s\n", (int)method_len, method);
-    printf("path is %.*s\n", (int)path_len, path);
-    printf("HTTP version is 1.%d\n", minor_version);
+    printf("method is %.*s\n", (int)method_len, httprequest->verbo);
+    printf("path is %.*s\n", (int)path_len, httprequest->path);
+    printf("HTTP version is 1.%d\n", httprequest->version);
     printf("headers:\n");
 
+    char *rpta =  "HTTP/1.1 200 OK\r\n";
+
+    send(clientsocket, rpta, strlen(rpta), 0);
 
     for (i = 0; i != num_headers; ++i) {
-        printf("%.*s: %.*s\n", (int)headers[i].name_len, headers[i].name,
-            (int)headers[i].value_len, headers[i].value);
+        printf("%.*s: %.*s\n", (int)httprequest->cabeceras[i].name_len, httprequest->cabeceras[i].name,
+            (int)httprequest->cabeceras[i].value_len, httprequest->cabeceras[i].value);
     }
-
     return 0;
 }
 
+
+
+/*TODO*/
 void _error_400(){
+
     printf("Error 400:bad request");
 }
