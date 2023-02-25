@@ -51,7 +51,6 @@ int  main()
         /*Crea un nuevo hilo por conexión*/
         if ( (childpid = fork()) == 0) { /* child process */    
             /* process request */
-            printf("Proceso creado");
             server_process_request(client_socket,httprequest);
             
             /*Proceso hijo termina*/

@@ -17,4 +17,4 @@ picohttpparser.o: $(SRCLIB)server_utils.c
 	gcc -g -pthread -c $(SRCLIB)picohttpparser.c -o $(OBJ)picohttpparser.o
 
 clean:
-	rm -f *.o
+	rm server client -f $(OBJ)*.o

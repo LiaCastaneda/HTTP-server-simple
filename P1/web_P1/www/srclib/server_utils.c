@@ -15,6 +15,9 @@
 
 /*Funciones privadas*/
 void _error_400();
+void _error_404();
+int _process_GET(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request);
+
 
 /*Inicializa servidor*/
 int server_init(){
@@ -44,7 +47,6 @@ int server_init(){
             strtok(NULL," \n");
             max_clients = atoi(strtok(NULL," \n"));
         }
-
     }
 
     /*Abre Socket del servidor*/
@@ -94,13 +96,13 @@ int server_accept_connection(int serverSocket){
 }
 
 int server_process_request(int clientsocket, HttpRequest * httprequest){
-    
-    char buf[MAX];
+    FILE *confile;
+    char buf[MAX],buff[1000], sever_signature[100], server_root[100], method[100],path[100];
     int pret,i;
     size_t buflen = 0, prevbuflen = 0, method_len, path_len, num_headers;
     ssize_t rret;
 
-    
+    /*Parsea petición---------------------------------------------------------*/
     while (1) {
         /* read the request */
         while ((rret = read(clientsocket, buf + buflen, sizeof(buf) - buflen)) == -1 && errno == EINTR);
@@ -116,10 +118,9 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
         pret = phr_parse_request(buf, buflen, &(httprequest->verbo), &method_len, &(httprequest->path), &path_len,
                                 &(httprequest->version), httprequest->cabeceras, &num_headers, prevbuflen);
         
-        if (pret > 0)
+        if (pret > 0){
             break; /* successfully parsed the request */
-        else if (pret == -1){
-            /*not parsed --> error 400*/
+        }else if (pret == -1){
             _error_400();
             return -1; 
         }
@@ -135,27 +136,93 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
             
     }
 
+    sprintf(method, "%.*s", (int)method_len, httprequest->verbo);
+    sprintf(path,"%.*s", (int)path_len, httprequest->path);
+
+    /*Server signature and ROOT----------------------------------------------*/
+    confile = fopen("server.conf", "r");
+    if (confile == NULL ) {
+        printf("Error Abriendo fichero de configuración");
+        return -1;
+    }
+    while(fgets(buff,1000,confile)){
+        if(strncmp("sever_signature",buff,strlen("sever_signature"))==0){
+            strtok(buff," \n");
+            strtok(NULL," \n");
+            sprintf(sever_signature, "%s", strtok(NULL," \n"));
+        }
+
+        if(strncmp("server_root",buff,strlen("server_root"))==0){
+            strtok(buff," \n");
+            strtok(NULL," \n");
+            sprintf(server_root, "%s", strtok(NULL," \n"));
+        }
+    }
+
+    /*verifica versión------------------------------------------------------*/
+    if((httprequest->version != 1)&&(httprequest->version != 0)){
+        _error_400();
+    }
+
+    /*Verifica verbo----------------------------------------------------------*/
+    if(strcmp(method,"GET")==0){
+        _process_GET(clientsocket,server_root,path,sever_signature,httprequest);
+    } else if(strcmp(method,"POST")==0){
+        printf("Verbo es POST\n");
+    } else if(strcmp(method,"OPTIONS")==0){
+        printf("Verbo es OPTIONS\n");
+    }else{
+        _error_400();
+    }
+
+
+    /*DEBUGGING PURPOSES--------------------------------------------------------*/
     printf("request is %d bytes long\n", pret);
     printf("method is %.*s\n", (int)method_len, httprequest->verbo);
     printf("path is %.*s\n", (int)path_len, httprequest->path);
     printf("HTTP version is 1.%d\n", httprequest->version);
     printf("headers:\n");
 
-    char *rpta =  "HTTP/1.1 200 OK\r\n";
-
-    send(clientsocket, rpta, strlen(rpta), 0);
-
     for (i = 0; i != num_headers; ++i) {
         printf("%.*s: %.*s\n", (int)httprequest->cabeceras[i].name_len, httprequest->cabeceras[i].name,
             (int)httprequest->cabeceras[i].value_len, httprequest->cabeceras[i].value);
     }
+
     return 0;
 }
 
+/*PROCESS GET*/
+int _process_GET(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request){
+    char *rpta, ruta_recurso[1000];
+    FILE *recurso;
 
+    /*Crea ruta a recurso*/
+    sprintf(ruta_recurso, "%s%s",server_root,path);
+    
+    printf("%s",ruta_recurso);
+    /*Abre y lee recurso*/
+    recurso = fopen(ruta_recurso,"r");
+    if (recurso == NULL){
+        printf("Error buscando recurso %s\n", ruta_recurso);
+        _error_404();
+        return -1;
+    }
+
+    /*Default answer*/
+    rpta =  "HTTP/1.1 200 OK\r\n";
+    send(clientsocket, rpta, strlen(rpta), 0);
+
+    fclose(recurso);
+    return 0;
+
+}
 
 /*TODO*/
 void _error_400(){
 
     printf("Error 400:bad request");
+}
+
+void _error_404(){
+    printf("Error404");
 }
