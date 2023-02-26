@@ -8,16 +8,21 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "../includes/server_utils.h"
 #include "../includes/picohttpparser.h"
 #include <assert.h>
+#include <time.h>
 #define MAX 4096
 
 /*Funciones privadas*/
 void _error_400();
 void _error_404();
 int _process_GET(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request);
-
+int _get_type_extension(char *path, char *type_extension);
+int _script_execute();
+void _current_date(char *date);
 
 /*Inicializa servidor*/
 int server_init(){
@@ -193,13 +198,14 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
 
 /*PROCESS GET*/
 int _process_GET(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request){
-    char *rpta, ruta_recurso[1000];
+    char rpta[1024], ruta_recurso[1000],type_extension[100],fecha_actual[128],last_modified[128];
     FILE *recurso;
+    int ret,recurso_sock;
+    struct stat s;
 
     /*Crea ruta a recurso*/
     sprintf(ruta_recurso, "%s%s",server_root,path);
     
-    printf("%s",ruta_recurso);
     /*Abre y lee recurso*/
     recurso = fopen(ruta_recurso,"r");
     if (recurso == NULL){
@@ -208,21 +214,96 @@ int _process_GET(int clientsocket, char *server_root, char *path, char *server_s
         return -1;
     }
 
-    /*Default answer*/
-    rpta =  "HTTP/1.1 200 OK\r\n";
+    /*Obtiene tipo de fichero*/
+    ret = _get_type_extension(ruta_recurso,type_extension);
+
+    if(ret == -1){
+        _error_400();
+        fclose(recurso);
+        return -1;
+    }else if(ret == 1){
+        _script_execute();
+        fclose(recurso);
+        return 0;
+    }
+
+    /*Obtiene last modified y Date*/
+    _current_date(fecha_actual);
+    stat(ruta_recurso, &s);
+    strftime(last_modified, 128, "%a, %d %b %Y %H:%M:%S %Z", gmtime(&s.st_mtime));
+
+    /*Construye cabecera http y envía*/
+    sprintf(rpta,"HTTP/1.%d 200 OK\r\nDate: %s\r\nServer: %s\r\nContent-Length: %ld\r\nLast-Modified: %s\r\nContent-Type: %s\r\n\r\n",
+    request->version,fecha_actual,server_signature, s.st_size, last_modified,type_extension);
+
     send(clientsocket, rpta, strlen(rpta), 0);
+
+    /*Envia recurso*/
+    recurso_sock = open(ruta_recurso, O_RDONLY);
+    while ((ret = read(recurso_sock, rpta, 8192)) > 0) {
+
+        send(clientsocket, rpta, ret, 0);
+    }
 
     fclose(recurso);
     return 0;
 
 }
 
-/*TODO*/
+/*Errores-->TODO*/
 void _error_400(){
 
     printf("Error 400:bad request");
 }
 
 void _error_404(){
-    printf("Error404");
+    printf("Error404\n");
+}
+
+/*funciones de apoyo*/
+
+int _get_type_extension(char *path, char *type_extension){
+
+    char *type;
+
+    type = strrchr(path, '.');
+
+    if(strcmp(type, ".gif")==0){
+        strcpy(type_extension,"image/gif");
+        return 0;
+    }else if(strcmp(type,".txt")==0){
+        strcpy(type_extension,"text/plain");
+        return 0;
+    }else if(strcmp(type,".html")==0){
+        strcpy(type_extension,"text/html");
+        return 0;
+    }else if ((strcmp(type,".jpeg")==0)||(strcmp(type,".jpg")==0)){
+        strcpy(type_extension,"image/jpeg");
+        return 0;
+    }else if ((strcmp(type,".mpeg")==0)||(strcmp(type,".mpg")==0)){
+        strcpy(type_extension,"video/mpeg");
+        return 0;
+    }else if ((strcmp(type,".doc")==0)||(strcmp(type,".docx")==0)){
+        strcpy(type_extension,"application/msword");
+        return 0;
+    }else if (strcmp(type,".pdf")==0){
+        strcpy(type_extension,"application/pdf");
+        return 0;
+    }else if((strcmp(type,".php")==0)||(strcmp(type,".py")==0)){
+        return 1; /*SCRIPT*/
+    }else{
+        return -1;
+    }
+
+
+}
+
+int _script_execute(){
+    return 0;
+}
+
+void _current_date(char *date) {
+    time_t tiempo = time(0);
+    struct tm *t = gmtime(&tiempo);
+    strftime(date, 128, "%a, %d %b %Y %H:%M:%S %Z", t);
 }
