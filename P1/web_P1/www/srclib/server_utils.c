@@ -241,7 +241,6 @@ int _process_GET(int clientsocket, char *server_root, char *path, char *server_s
     /*Envia recurso*/
     recurso_sock = open(ruta_recurso, O_RDONLY);
     while ((ret = read(recurso_sock, rpta, 8192)) > 0) {
-
         send(clientsocket, rpta, ret, 0);
     }
 
