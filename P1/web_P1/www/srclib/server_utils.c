@@ -15,14 +15,16 @@
 #include <assert.h>
 #include <time.h>
 #define MAX 4096
+#define MAX_ARGS 5
 
 /*Funciones privadas*/
-void _error_400();
-void _error_404();
+void _error_400(int clientsocket, char *server_root,char *server_signature, HttpRequest * request);
+void _error_404(int clientsocket, char *server_root,char *server_signature, HttpRequest * request);
 int _process_GET(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request);
+int _process_GET_ARGS(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request);
+int _process_options(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request);
 int _get_type_extension(char *path, char *type_extension);
-int _script_execute();
-void _current_date(char *date);
+void get_current_date(char *date);
 
 /*Inicializa servidor*/
 int server_init(){
@@ -126,7 +128,6 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
         if (pret > 0){
             break; /* successfully parsed the request */
         }else if (pret == -1){
-            _error_400();
             return -1; 
         }
 
@@ -135,7 +136,6 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
 
         /*request is too long*/
         if (buflen == sizeof(buf)){
-            _error_400();
             return -1;
         }
             
@@ -166,31 +166,24 @@ int server_process_request(int clientsocket, HttpRequest * httprequest){
 
     /*verifica versión------------------------------------------------------*/
     if((httprequest->version != 1)&&(httprequest->version != 0)){
-        _error_400();
+        _error_400(clientsocket,server_root,"",httprequest);
     }
 
     /*Verifica verbo----------------------------------------------------------*/
     if(strcmp(method,"GET")==0){
-        _process_GET(clientsocket,server_root,path,sever_signature,httprequest);
+        /*GET con argumentos*/
+        if(strstr(path,"?") != NULL){
+            _process_GET_ARGS(clientsocket,server_root,path,sever_signature,httprequest);
+        }else{
+        /*GET sin argumentos*/
+            _process_GET(clientsocket,server_root,path,sever_signature,httprequest);
+        }
     } else if(strcmp(method,"POST")==0){
         printf("Verbo es POST\n");
     } else if(strcmp(method,"OPTIONS")==0){
-        printf("Verbo es OPTIONS\n");
+        _process_options(clientsocket,server_root,path,sever_signature,httprequest);
     }else{
-        _error_400();
-    }
-
-
-    /*DEBUGGING PURPOSES--------------------------------------------------------*/
-    printf("request is %d bytes long\n", pret);
-    printf("method is %.*s\n", (int)method_len, httprequest->verbo);
-    printf("path is %.*s\n", (int)path_len, httprequest->path);
-    printf("HTTP version is 1.%d\n", httprequest->version);
-    printf("headers:\n");
-
-    for (i = 0; i != num_headers; ++i) {
-        printf("%.*s: %.*s\n", (int)httprequest->cabeceras[i].name_len, httprequest->cabeceras[i].name,
-            (int)httprequest->cabeceras[i].value_len, httprequest->cabeceras[i].value);
+        _error_400(clientsocket,server_root,"",httprequest);
     }
 
     return 0;
@@ -203,60 +196,205 @@ int _process_GET(int clientsocket, char *server_root, char *path, char *server_s
     int ret,recurso_sock;
     struct stat s;
 
-    /*Crea ruta a recurso*/
-    sprintf(ruta_recurso, "%s%s",server_root,path);
+    /*Ruta del servidor por defecto --> /*/
+    if(strlen(path)==1){
+        sprintf(ruta_recurso, "%s/index.html",server_root);
+    }else{
+        /*Crea ruta a recurso*/
+        sprintf(ruta_recurso, "%s%s",server_root,path);
+    }
     
     /*Abre y lee recurso*/
     recurso = fopen(ruta_recurso,"r");
     if (recurso == NULL){
         printf("Error buscando recurso %s\n", ruta_recurso);
-        _error_404();
+        _error_404(clientsocket,server_root, server_signature,request);
         return -1;
     }
 
     /*Obtiene tipo de fichero*/
     ret = _get_type_extension(ruta_recurso,type_extension);
 
-    if(ret == -1){
-        _error_400();
+    if((ret == -1)||(ret==1)){
+        _error_400(clientsocket,server_root,server_signature,request);
         fclose(recurso);
         return -1;
-    }else if(ret == 1){
-        _script_execute();
-        fclose(recurso);
-        return 0;
     }
 
     /*Obtiene last modified y Date*/
-    _current_date(fecha_actual);
+    get_current_date(fecha_actual);
     stat(ruta_recurso, &s);
     strftime(last_modified, 128, "%a, %d %b %Y %H:%M:%S %Z", gmtime(&s.st_mtime));
 
     /*Construye cabecera http y envía*/
-    sprintf(rpta,"HTTP/1.%d 200 OK\r\nDate: %s\r\nServer: %s\r\nContent-Length: %ld\r\nLast-Modified: %s\r\nContent-Type: %s\r\n\r\n",
-    request->version,fecha_actual,server_signature, s.st_size, last_modified,type_extension);
+    sprintf(rpta,"HTTP/1.%d 200 OK\r\nDate: %s\r\nServer: %s\r\nLast-Modified: %s\r\nContent-Length: %ld\r\nContent-Type: %s\r\n\r\n",
+    request->version,fecha_actual,server_signature, last_modified, s.st_size,type_extension);
 
     send(clientsocket, rpta, strlen(rpta), 0);
 
     /*Envia recurso*/
     recurso_sock = open(ruta_recurso, O_RDONLY);
-    while ((ret = read(recurso_sock, rpta, 8192)) > 0) {
+    while ((ret = read(recurso_sock, rpta, 1024)) > 0) {
         send(clientsocket, rpta, ret, 0);
     }
 
-    fclose(recurso);
     return 0;
 
 }
 
-/*Errores-->TODO*/
-void _error_400(){
+int _process_GET_ARGS(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request){
+    char *ret, *retargs, path_noargs[250], args[200], ruta_recurso[500], type_extension[100], command[1000], env[40], resultado[600], fecha_actual[128], last_modified[128], rpta[1024];
+    char *a1, *a2, *a3, *a4, *a5;
+    int rett, i, flag, content_length;
+    FILE *recurso, *salida;
+    struct stat s;
 
-    printf("Error 400:bad request");
+    /*Quitar argumentos de path*/
+    ret = strtok(path, "?");
+    strcpy(path_noargs,ret);
+    retargs = strtok(NULL, "?");
+    strcpy(args, retargs);
+
+    /*Crea ruta a recurso*/
+    sprintf(ruta_recurso, "%s%s",server_root,path_noargs);
+
+    /*Abre y lee script*/
+    recurso = fopen(ruta_recurso,"r");
+    if (recurso == NULL){
+        printf("Error buscando recurso %s\n", ruta_recurso);
+        _error_404(clientsocket,server_root, server_signature,request);
+        return -1;
+    }
+    fclose(recurso);
+
+    rett = _get_type_extension(ruta_recurso,type_extension);
+
+    /*Tiene que ser .php o .py*/
+    if(rett != 1){
+        printf("Error con GET: Script tiene que ser .php o .py \n");
+        _error_400(clientsocket,server_root,server_signature,request);
+        return -1;
+    }
+
+    printf("ruta:%s\n", ruta_recurso);
+    printf("argumentos:%s\n",args);
+    printf("Tipo:%s\n",type_extension);
+
+
+    /*un solo argumento en URL*/
+    if(strstr(args,"&")==NULL){
+        a1 = strchr(args, '=') +1;
+    }
+
+
+    /*Crea comando*/
+    if(strcmp(type_extension, ".py")==0){
+        strcpy(env, "python3");
+    }else{
+        strcpy(env, "php");
+    }
+
+    sprintf(command, "%s %s %s",env, ruta_recurso, a1);
+
+    printf("%s\n",command);
+
+    /*Ejecuta script*/
+    salida= popen(command, "r");
+
+    if(salida==NULL){
+        printf("Error ejecutando script");
+        return -1;
+    }
+
+    content_length = fread(resultado, sizeof(char), 600, salida);
+
+    /*Obtiene last modified y Date*/
+    get_current_date(fecha_actual);
+    stat(ruta_recurso, &s);
+    strftime(last_modified, 128, "%a, %d %b %Y %H:%M:%S %Z", gmtime(&s.st_mtime));
+
+    /*Construye cabecera http y envía*/
+    sprintf(rpta,"HTTP/1.%d 200 OK\r\nDate: %s\r\nServer: %s\r\nLast-Modified: %s\r\nContent-Length: %d\r\nContent-Type: text/html\r\n%s\r\n\r\n",
+    request->version,fecha_actual,server_signature, last_modified, content_length,resultado);
+
+    send(clientsocket, rpta, strlen(rpta), 0);
+
+    pclose(salida);
+
+    return 0;
 }
 
-void _error_404(){
-    printf("Error404\n");
+
+int _process_options(int clientsocket, char *server_root, char *path, char *server_signature, HttpRequest *request){
+    char  fecha_actual[128], cabecera[400];
+
+    get_current_date(fecha_actual);
+
+    sprintf(cabecera,"HTTP/1.%d 200 OK\r\nDate: %s\r\nServer: %s\r\nContent-Length: 0\r\nAllow: GET,POST,OPTIONS\r\n\r\n",
+    request->version,fecha_actual,server_signature);
+
+    send(clientsocket, cabecera, strlen(cabecera), 0);
+
+    return 0;
+
+}
+
+
+/*Errores-->TODO*/
+void _error_400(int clientsocket, char *server_root,char *server_signature, HttpRequest * request){
+
+    char rpta[1024], fecha_actual[128], type_extension[100], cabecera[400];
+    struct stat s;
+    int  lenght;
+
+    sprintf(type_extension, "text/html");
+
+    /*Obtiene Date*/
+    get_current_date(fecha_actual);
+
+    /*imprime respuesta*/
+    lenght = sprintf(rpta, "<doctype html>\n"
+          "<html>\n"
+          "<head><meta charset=\"UTF-8\"></head>\n"
+          "<body><h1>Error 400 Bad Request</h1></body>\n"
+          "</html>");
+
+    /*Envía cabecera*/
+    sprintf(cabecera,"HTTP/1.%d 400 Bad Request\r\nDate: %s\r\nServer: %s\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n",
+    request->version,fecha_actual,server_signature, lenght,type_extension);
+
+    send(clientsocket, cabecera, strlen(cabecera), 0);
+
+    /*Envia error*/
+    send(clientsocket, rpta, strlen(rpta), 0);
+}
+
+
+void _error_404(int clientsocket, char *server_root,char *server_signature, HttpRequest * request){
+    char rpta[1024], fecha_actual[128], type_extension[100], cabecera[400];
+    struct stat s;
+    int  lenght;
+
+    sprintf(type_extension, "text/html");
+
+    /*Obtiene Date*/
+    get_current_date(fecha_actual);
+
+    /*imprime respuesta*/
+    lenght = sprintf(rpta, "<doctype html>\n"
+          "<html>\n"
+          "<head><meta charset=\"UTF-8\"></head>\n"
+          "<body><h1>Error 404 Not Found</h1></body>\n"
+          "</html>");
+
+    /*Envía cabecera*/
+    sprintf(cabecera,"HTTP/1.%d 404 Not Found\r\nDate: %s\r\nServer: %s\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n",
+    request->version,fecha_actual,server_signature, lenght,type_extension);
+
+    send(clientsocket, cabecera, strlen(cabecera), 0);
+
+    /*Envia error*/
+    send(clientsocket, rpta, strlen(rpta), 0);
 }
 
 /*funciones de apoyo*/
@@ -266,6 +404,10 @@ int _get_type_extension(char *path, char *type_extension){
     char *type;
 
     type = strrchr(path, '.');
+    
+    if(type == NULL){
+        return -1;
+    }
 
     if(strcmp(type, ".gif")==0){
         strcpy(type_extension,"image/gif");
@@ -288,7 +430,11 @@ int _get_type_extension(char *path, char *type_extension){
     }else if (strcmp(type,".pdf")==0){
         strcpy(type_extension,"application/pdf");
         return 0;
-    }else if((strcmp(type,".php")==0)||(strcmp(type,".py")==0)){
+    }else if(strcmp(type,".php")==0){
+        strcpy(type_extension,".php");
+        return 1; /*SCRIPT*/
+    }else if(strcmp(type,".py")==0){
+        strcpy(type_extension,".py");
         return 1; /*SCRIPT*/
     }else{
         return -1;
@@ -297,11 +443,7 @@ int _get_type_extension(char *path, char *type_extension){
 
 }
 
-int _script_execute(){
-    return 0;
-}
-
-void _current_date(char *date) {
+void get_current_date(char *date) {
     time_t tiempo = time(0);
     struct tm *t = gmtime(&tiempo);
     strftime(date, 128, "%a, %d %b %Y %H:%M:%S %Z", t);
