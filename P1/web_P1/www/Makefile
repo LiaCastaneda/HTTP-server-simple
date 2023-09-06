@@ -2,19 +2,22 @@ SRCLIB = ./srclib/
 SRC = ./src/
 OBJ = ./obj/
 
-all: server_utils.o picohttpparser.o server client 
+all: server_utils.o picohttpparser.o a_lib server 
 
-server:  $(SRC)server.c 
-	gcc -g -pthread -o server $(SRC)server.c $(OBJ)server_utils.o $(OBJ)picohttpparser.o
-
-client: $(SRC)client.c
-	gcc -g -pthread -o client $(SRC)client.c
+server.o:  $(SRC)server.c
+	gcc -g -Wall -pthread -c $(SRC)server.c -o $(OBJ)server.o
+	
+server: server.o
+	gcc -g -Wall -pthread $(OBJ)server.o -L. -lserver_utils -o server
 
 server_utils.o: $(SRCLIB)server_utils.c
-	gcc -g -pthread -c $(SRCLIB)server_utils.c -o $(OBJ)server_utils.o
+	gcc -g -Wall -pthread -c $(SRCLIB)server_utils.c -o $(OBJ)server_utils.o
 
 picohttpparser.o: $(SRCLIB)server_utils.c
-	gcc -g -pthread -c $(SRCLIB)picohttpparser.c -o $(OBJ)picohttpparser.o
+	gcc -g -Wall -pthread -c $(SRCLIB)picohttpparser.c -o $(OBJ)picohttpparser.o
+
+a_lib:
+	ar -rcs libserver_utils.a $(OBJ)server_utils.o $(OBJ)picohttpparser.o
 
 clean:
-	rm server client -f $(OBJ)*.o
+	rm server libserver_utils.a -f $(OBJ)*.o

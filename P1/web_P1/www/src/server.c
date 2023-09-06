@@ -10,12 +10,13 @@
 #include <netinet/in.h>
 #include <sys/wait.h>
 #include <arpa/inet.h>
+#include <syslog.h>
 
 int serverSocket,client_socket;
 HttpRequest *httprequest;
 
 void sig_int(int signo){
-    printf("\nTerminación de proceso...");
+    syslog(LOG_INFO,"\nTerminación de proceso...");
     close(client_socket);
     close(serverSocket);
     free(httprequest);
