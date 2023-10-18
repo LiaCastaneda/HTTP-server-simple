@@ -1,5 +1,7 @@
 #PRACTICA I REDES DE COMUNICACIONES II:
 
+En esta práctica se realizó un servidor http simple en C. Algunos de los verbos soportados son: GET y POST y errores 400, 500, 501.
+
 Primero: asegurarse que la carpeta recursos está dentro de la carpeta de la práctica y que está asignada a la variable server_root en el fichero server.conf, pues esta contiene todos los ficheros disponibles para la petición de recursos. 
 
 Segundo: ejecutar el siguiente comando en la consola:
