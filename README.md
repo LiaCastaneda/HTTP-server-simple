@@ -1,4 +1,4 @@
-#PRACTICA I REDES DE COMUNICACIONES II:
+# PRACTICA I REDES DE COMUNICACIONES II
 
 En esta práctica se realizó un servidor http simple en C. Algunos de los verbos soportados son: GET y POST y errores 400, 500, 501.
 
